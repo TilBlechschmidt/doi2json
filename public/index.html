@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>DOI-2-JSON</title>
+
+    <style>
+        pre {
+            /*outline: 1px solid #ccc;*/
+            padding: 1em;
+            color: #ECEFF4;
+        }
+        .string { color: #A3BE8C; }
+        .number { color: darkorange; }
+        .boolean { color: blue; }
+        .null { color: magenta; }
+        .key { color: #88C0D0; }
+
+        html, body {
+            margin: 0;
+        }
+
+        body {
+            background-color: #3B4252;
+            font-family: Helvetica, 'sans-serif';
+            color: #E5E9F0;
+        }
+
+        #form {
+            max-width: 45em;
+            min-height: 30em;
+
+            margin: 0 auto;
+            text-align: center;
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        label, #form > div {
+            width: 100%;
+        }
+
+        input, button {
+            background: none;
+            border: none;
+            display: inline-block;
+            padding: 1rem .5rem;
+            outline: none;
+        }
+
+        #form.no-results {
+            height: 100vh;
+        }
+
+        #doi-wrapper {
+            display: flex;
+            background: #4C566A;
+            margin: 2rem 0;
+            color: #fff;
+        }
+
+        #doi {
+            flex-grow: 1;
+            margin: 0;
+            color: #ECEFF4;
+            box-shadow: inset 0 2px 2px hsla(0, 0%, 0%, .35), 0 2px 0 hsla(0, 0%, 100%, .15);
+            font-weight: 200;
+            font-size: large;
+            -webkit-user-select: all; /* for Safari */
+            user-select: all;
+        }
+
+        #submit {
+            background: #8FBCBB;
+            margin: 0;
+        }
+
+        #output-wrapper {
+            width: 45em;
+            margin: 0 auto;
+            box-shadow: inset 0 2px 2px hsla(0, 0%, 0%, .35), 0 2px 0 hsla(0, 0%, 100%, .15);
+            background: #2E3440;
+            outline: none;
+            position: relative;
+        }
+
+        #output-wrapper > button {
+            position: absolute;
+            top: 0;
+            right: 0;
+            color: #E5E9F0;
+        }
+
+        #output-wrapper > button:hover {
+            background: #8FBCBB;
+        }
+
+        #output-wrapper > button:active {
+            background: #A3BE8C;
+        }
+
+        #github {
+            position: absolute;
+            bottom: 1em;
+            left: 0;
+            width: 100%;
+
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 6em;
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+    <form id="form" class="no-results">
+        <div>
+            <h1>📖</h1>
+            <span>Convert DOIs to JSON</span>
+            <div id="doi-wrapper">
+                <input type="text" id="doi" placeholder="Enter a DOI" autofocus>
+                <button type="submit" id="submit">Convert</button>
+            </div>
+        </div>
+    </form>
+
+    <div id="output-wrapper">
+        <div id="output" contenteditable></div>
+        <button onclick="copyToClipboard()">Copy</button>
+    </div>
+
+    <div id="github">
+        <a href="https://github.com/TilBlechschmidt/doi2json">
+            <img src="/github.png" alt="GitHub" width="32px" height="32px">
+        </a>
+    </div>
+
+    <script>
+        const form = document.getElementById('form');
+        const button = document.getElementById('submit');
+        const input = document.getElementById('doi');
+        const output = document.getElementById('output');
+
+        let currentJSON = null;
+
+        function syntaxHighlight(json) {
+            json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function (match) {
+                let cls = 'number';
+                if (/^"/.test(match)) {
+                    if (/:$/.test(match)) {
+                        cls = 'key';
+                    } else {
+                        cls = 'string';
+                    }
+                } else if (/true|false/.test(match)) {
+                    cls = 'boolean';
+                } else if (/null/.test(match)) {
+                    cls = 'null';
+                }
+                return '<span class="' + cls + '">' + match + '</span>';
+            });
+        }
+
+        function cleanDOI(doi) {
+            return doi.replace(/(?:(?:https?:\/\/)?(?:.+?)?doi.org\/|doi:)/gmi, '');
+        }
+
+        async function loadBibTex(doi) {
+            const bibtexResponse = await fetch(`https://doi.org/${doi}`, {
+                headers: {
+                    'Accept': 'application/x-bibtex; charset=utf-8',
+                },
+                mode: 'cors',
+                redirect: 'follow',
+                referrerPolicy: 'no-referrer'
+            });
+
+            return bibtexResponse.text()
+        }
+
+        async function loadJSON(bibtex) {
+            const res = await fetch(`/bibtex`, {
+                method: 'POST',
+                body: bibtex
+            });
+
+            return await res.json();
+        }
+
+        function displayJSON(json) {
+            if (json.length === 0) {
+                output.innerText = "No results found.";
+            } else {
+                if (json.length === 1) json = json[0];
+                currentJSON = json;
+
+                const str = JSON.stringify(json, undefined, 4);
+                const child = document.createElement('pre');
+                child.innerHTML = syntaxHighlight(str);
+                output.appendChild(child);
+            }
+        }
+
+        function handleSubmit(event) {
+            event.preventDefault();
+
+            output.textContent = '';
+            input.disabled = true;
+            button.disabled = true;
+            currentJSON = null;
+
+            const doi = cleanDOI(input.value);
+
+            loadBibTex(doi)
+                .then(loadJSON)
+                .then(json => {
+                    input.disabled = false;
+                    button.disabled = false;
+                    form.className = '';
+                    displayJSON(json);
+                })
+                .catch(err => {
+                    input.disabled = false;
+                    button.disabled = false;
+                    form.className = '';
+                    output.innerText = err.message;
+                });
+
+            return false;
+        }
+
+        function copyToClipboard() {
+            navigator.clipboard.writeText(JSON.stringify(currentJSON, undefined, 4)).catch(err => alert(err));
+        }
+
+        form.addEventListener('submit', handleSubmit);
+    </script>
+</body>
+</html>
