@@ -1,1 +1,1 @@
-import { createApp } from "https://servestjs.org/@v1.1.2/mod.ts";
+import {createApp, serveStatic} from "https://deno.land/x/servest@v1.1.3/mod.ts";
